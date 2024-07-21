@@ -37,6 +37,7 @@ def filterLines(src):
                     good = good and isPixelsEqual(color, src[ky, kx])
                     if not good: break
                 if not good: break
+                # colors[color] = ???
             dst[y, x] = 255 if good else 0
     return dst
 
