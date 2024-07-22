@@ -1,5 +1,6 @@
 import cv2
 import numpy as np
+import pickle
 
 dstBgColor = 255
 dstSymColor = 0
@@ -9,7 +10,8 @@ def col2val(color):
     Преобразуем три компонента цвета в беззнаковое целое.
     '''
     r, g, b = color
-    return r + (g << 8) + (b << 16)
+    return (r & 0xF8) + (g << 8) + ((b & 0xF8) << 16)
+    #return (r) + (g << 8) + ((b) << 16)
 
 def val2col(value):
     '''
@@ -44,17 +46,19 @@ def flat2rgb(src):
             dst[y, x] = val2col(src[y, x])
     return dst
 
-def filterLines(ksize, src):
+def filterLines(ksize, src, captchaValue):
+    print(f"Начинается очистка капчи, ядро: {ksize}")
 
     # Получаем размер исходного массива
     h, w = src.shape
 
-    # Создаём массив таких-же размеров, но 8-битных целых
-    map = np.zeros((h, w), np.uint8)
-    
+    print(f"  Исходное изображение:")
+    print(f"    Размер: {w}x{h}")
+
     # Задаём размеры ядра
     kernel_w = ksize
     kernel_h = ksize
+    print(f"  Размер ядра: {kernel_w}x{kernel_h}")
 
     # Вычисляем крайние положения, которые может занимать
     # левый верхний пиксел ядра
@@ -62,6 +66,12 @@ def filterLines(ksize, src):
     right = w - kernel_w - 1
     top = 0
     bottom = h - kernel_h - 1
+
+    print(f"  Ограничение окна для вернего левого угла ядра:")
+    print(f"    Слева: {left}")
+    print(f"    Сверху: {top}")
+    print(f"    Справа: {right}")
+    print(f"    Снизу: {bottom}")
 
     # В этом ассоциативном массиве (карте) мы будем хранить
     # количество пикселов соответствующего цвета
@@ -71,9 +81,26 @@ def filterLines(ksize, src):
     colors = {}
     # Вычисляем массив, только если он пуст,
     # иначе пропускаем вычисления и загружаем карту
-    if not colors:
+    pixelMapFilename = f'data/{captchaValue}.map'
+    colorMapFilename = f'data/{captchaValue}.colors'
+
+    map = {}
+    colors = {}
+
+    try:
+        #raise "noload"
+        map = np.load(f"{pixelMapFilename}.npy")
+        with open(colorMapFilename, 'rb') as fd:
+            colors = pickle.load(fd)
+    except:
+        print(f"  Не удалось загрузить предыдущие результаты вычислений")
+
+        # Создаём массив таких-же размеров, но 8-битных целых
+        map = np.zeros((h, w), np.uint8)
+        colors.clear()
+
+        print(f"  Ведётся поиск областей одинакового цвета, размером с ядро...")
         for y in range(top, bottom):
-            print(f"добрались до {y}")
             for x in range(left, right):
                 color = src[y, x]
                 good = True
@@ -86,10 +113,10 @@ def filterLines(ksize, src):
                 if not good: continue
                 count = colors.get(color, 0)
                 colors[color] = count + 1
-        print(f"colors: {colors}")
-        np.save('data/pixel.map', map)
-    else:
-        map = np.load('data/pixel.map.npy')
+        print(f"  Сохранение результатов вычислений")
+        np.save(pixelMapFilename, map)
+        with open(colorMapFilename, 'wb') as fd:
+            pickle.dump(colors, fd)
 
     # Вычисляем цвет фона, предполагая что площадь (количество пикселов)
     # цвета фона должно быть больше, чем площадь любого символа.
@@ -101,7 +128,7 @@ def filterLines(ksize, src):
             bgColor = color
             maxCount = count
 
-    dst = np.zeros_like(src)
+    dst = np.full_like(src, 128)
     for y in range(h):
         for x in range(w):
             pixelColor = src[y, x]
@@ -111,15 +138,22 @@ def filterLines(ksize, src):
     return dst
 
 def main():
-    capId = 27319
-    ksize = 6
+    capId = 25753 # 99448
+    ksize = 5
 
-    image = cv2.imread(f'data/nebot/{capId}.png')
+    image = cv2.imread(f'data/bot/{capId}.jpg')
     cv2.imshow('Src', image)
     cv2.waitKey(1)
 
-    flat_src = rgb2flat(image)
-    flat_dst = filterLines(ksize, flat_src)
+    src = cv2.blur(image, (ksize, ksize))
+
+    flat_src = rgb2flat(src)
+
+    rest_src = flat2rgb(flat_src)
+    cv2.imshow('Src-Rest', rest_src)
+    cv2.waitKey(1)
+
+    flat_dst = filterLines(ksize, flat_src, capId)
 
     dst = flat2rgb(flat_dst)
     cv2.imshow('Dst', dst)
